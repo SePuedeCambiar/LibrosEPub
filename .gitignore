@@ -9,6 +9,7 @@ Thumbs.db
 .vscode/
 *.sublime-project
 *.sublime-workspace
+*.iml
 
 # ==========================================
 # Backend (Go)
@@ -24,10 +25,11 @@ backend/cmd/api/api
 *.test
 *.out
 
-# Dependencias Go (si usas vendor)
+# Dependencias Go
 backend/vendor/
 
-# Archivos de libros descargados (para no subir gigabytes a Git)
+# ALMACENAMIENTO: No subir los libros descargados
+# Ignora todo en downloads pero mantiene el .gitkeep
 backend/storage/downloads/*
 !backend/storage/downloads/.gitkeep
 
@@ -36,18 +38,18 @@ backend/storage/downloads/*
 backend/.env
 
 # ==========================================
-# Android / Kotlin / Gradle
+# Android / Kotlin / Gradle (Ruta: ReaderApp/)
 # ==========================================
 # Caché y archivos de compilación de Gradle
-android/.gradle/
-android/build/
-android/*/build/
-android/captures/
+ReaderApp/.gradle/
+ReaderApp/app/build/
+ReaderApp/build/
+ReaderApp/captures/
 
 # Archivos generados de Android Studio
-android/.externalNativeBuild/
-android/.cxx/
-android/local.properties
+ReaderApp/.externalNativeBuild/
+ReaderApp/.cxx/
+ReaderApp/local.properties
 
 # Paquetes APK y AAB compilados
 *.apk
@@ -59,5 +61,13 @@ android/local.properties
 *.keystore
 
 # Reportes de pruebas
-android/*/lint/
-android/*/reports/
+ReaderApp/app/reports/
+ReaderApp/app/lint/
+
+# ==========================================
+# Datos de Usuario / Lectura (Local)
+# ==========================================
+# Si generas backups de preferencias o DBs locales para pruebas
+*.db
+*.db-shm
+*.db-wal
