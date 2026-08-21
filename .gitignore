@@ -1,0 +1,63 @@
+# ==========================================
+# Archivos de Sistema Operativo e IDEs
+# ==========================================
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# ==========================================
+# Backend (Go)
+# ==========================================
+# Binarios compilados
+backend/bin/
+backend/cmd/api/api
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependencias Go (si usas vendor)
+backend/vendor/
+
+# Archivos de libros descargados (para no subir gigabytes a Git)
+backend/storage/downloads/*
+!backend/storage/downloads/.gitkeep
+
+# Logs y variables de entorno
+*.log
+backend/.env
+
+# ==========================================
+# Android / Kotlin / Gradle
+# ==========================================
+# Caché y archivos de compilación de Gradle
+android/.gradle/
+android/build/
+android/*/build/
+android/captures/
+
+# Archivos generados de Android Studio
+android/.externalNativeBuild/
+android/.cxx/
+android/local.properties
+
+# Paquetes APK y AAB compilados
+*.apk
+*.aab
+*.ap_
+
+# Claves criptográficas de firma
+*.jks
+*.keystore
+
+# Reportes de pruebas
+android/*/lint/
+android/*/reports/
