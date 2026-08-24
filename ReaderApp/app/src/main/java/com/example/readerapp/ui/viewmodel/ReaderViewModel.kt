@@ -1,4 +1,4 @@
 package com.example.readerapp.ui.viewmodel
 
-class LibraryViewModel {
+class ReaderViewModel {
 }
