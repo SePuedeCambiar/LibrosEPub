@@ -53,24 +53,28 @@ class ReaderViewModel(
     var globalCurrentPage by mutableIntStateOf(1)
         private set
 
+    var isChapterLoading by mutableStateOf(false)
+        private set
+
     var settings by mutableStateOf(preferences.getReaderSettings())
         private set
 
     inner class WebAppInterface {
         @JavascriptInterface
         fun onPaginationReady(total: Int, current: Int) {
-            Log.d(tag, "📡 [Bridge] Paginación lista -> Total: $total, Página actual: $current")
             chapterTotalPages = maxOf(1, total)
             chapterCurrentPage = current
+            isChapterLoading = false
             updateGlobalPage()
+            Log.d(tag, "📡 [Bridge] Paginación lista -> Cap ${currentChapterIndex + 1}: Pág ${current + 1} de $total")
         }
 
         @JavascriptInterface
         fun onPageChanged(current: Int, total: Int) {
-            Log.d(tag, "📡 [Bridge] Página cambiada -> ${current + 1} / $total")
             chapterCurrentPage = current
             chapterTotalPages = maxOf(1, total)
             updateGlobalPage()
+            Log.d(tag, "📡 [Bridge] Pág: ${current + 1} / $total (Capítulo ${currentChapterIndex + 1})")
         }
     }
 
@@ -136,6 +140,7 @@ class ReaderViewModel(
         val currentBook = book ?: return
         if (index !in currentBook.chapters.indices) return
 
+        isChapterLoading = true
         currentChapterIndex = index
         targetPageInChapter = initialPage
 
@@ -144,7 +149,7 @@ class ReaderViewModel(
             currentChapterHref = chapter.href
             Log.d(tag, "🔄 Cargando capítulo $index: '${chapter.title}'")
             val rawHtml = parser.getChapterContent(bookFile, chapter)
-            currentHtmlContent = buildPaginatedHtml(rawHtml, targetPageInChapter)
+            currentHtmlContent = buildExactGridHtml(rawHtml, targetPageInChapter)
         }
     }
 
@@ -156,14 +161,18 @@ class ReaderViewModel(
     }
 
     fun onNextChapterRequested() {
+        if (isChapterLoading) return
         val totalChapters = book?.chapters?.size ?: 0
         if (currentChapterIndex < totalChapters - 1) {
+            Log.d(tag, "⏭️ Avanzando al capítulo: ${currentChapterIndex + 1}")
             loadChapter(currentChapterIndex + 1, initialPage = 0)
         }
     }
 
     fun onPrevChapterRequested() {
+        if (isChapterLoading) return
         if (currentChapterIndex > 0) {
+            Log.d(tag, "⏮️ Retrocediendo al capítulo: ${currentChapterIndex - 1}")
             loadChapter(currentChapterIndex - 1, initialPage = -1)
         }
     }
@@ -187,7 +196,7 @@ class ReaderViewModel(
         }
     }
 
-    private fun buildPaginatedHtml(rawHtml: String, startPage: Int): String {
+    private fun buildExactGridHtml(rawHtml: String, startPage: Int): String {
         val bodyContent = extractBodyContent(rawHtml)
 
         val bgColor = when (settings.theme) {
@@ -208,6 +217,9 @@ class ReaderViewModel(
             ReaderFont.MONOSPACE -> "monospace"
         }
 
+        val fontSize = settings.fontSize
+        val lineHeight = Math.round(fontSize * 1.75).toInt() // ej: 18px -> 32px exactos
+
         return """
             <!DOCTYPE html>
             <html>
@@ -217,57 +229,80 @@ class ReaderViewModel(
                     * {
                         box-sizing: border-box !important;
                     }
-                    html, body {
+                    html {
                         margin: 0 !important;
                         padding: 0 !important;
                         background-color: $bgColor !important;
+                    }
+                    body {
+                        margin: 0 !important;
+                        /* 40px arriba para librar barra superior, 100vh abajo para que la última página nunca se frene */
+                        padding: 40px 24px 100vh 24px !important;
+                        background-color: $bgColor !important;
                         color: $textColor !important;
                         font-family: $fontFace !important;
-                        font-size: ${settings.fontSize}px !important;
-                        line-height: 1.7 !important;
-                        overflow-x: hidden !important;
-                    }
-                    #book-container {
-                        padding: 24px 20px 90px 20px !important;
+                        font-size: ${fontSize}px !important;
+                        line-height: ${lineHeight}px !important;
                         text-align: justify !important;
                         word-break: break-word !important;
                     }
-                    #book-container * {
+                    #content-wrapper * {
                         color: inherit !important;
                         max-width: 100% !important;
                     }
+                    /* REGLA EDITORIAL ESTRICTA: Cero márgenes variables para eliminar deriva de línea */
                     p {
-                        text-indent: 1.2em !important;
-                        margin-top: 0.45em !important;
-                        margin-bottom: 0.45em !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        line-height: ${lineHeight}px !important;
+                        text-indent: 1.4em !important;
+                    }
+                    p:empty {
+                        display: none !important;
                     }
                     h1, h2, h3, h4 {
                         text-align: center !important;
                         text-indent: 0 !important;
-                        margin: 1em 0 0.5em 0 !important;
+                        line-height: ${lineHeight * 2}px !important;
+                        margin: ${lineHeight}px 0 !important;
+                        padding: 0 !important;
+                    }
+                    div, section, article {
+                        margin: 0 !important;
+                        padding: 0 !important;
                     }
                     img, svg {
                         max-width: 100% !important;
+                        max-height: ${lineHeight * 12}px !important;
                         height: auto !important;
                         display: block !important;
-                        margin: 16px auto !important;
+                        margin: ${lineHeight}px auto !important;
                     }
                 </style>
                 <script>
                     var totalPages = 1;
                     var currentPage = 0;
                     var pageStep = 0;
+                    var lineHeight = $lineHeight;
 
                     function initPages(target) {
                         try {
-                            var viewH = window.innerHeight || document.documentElement.clientHeight || 700;
-                            var totalH = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+                            var viewH = window.innerHeight || 700;
                             
-                            // Altura de 1 página de lectura (dejando 50px de overlap para lectura continua)
-                            pageStep = Math.max(200, viewH - 50);
-                            totalPages = Math.max(1, Math.ceil(totalH / pageStep));
+                            // Espacio útil: Altura de la pantalla menos 40px arriba y 80px abajo
+                            var safeUsableH = Math.max(lineHeight * 5, viewH - 120);
                             
-                            console.log("📊 [Páginas] AlturaTotal=" + totalH + ", Paso=" + pageStep + " -> Páginas=" + totalPages);
+                            // Número EXACTO de líneas que caben sin cortar ninguna
+                            var linesPerPage = Math.max(1, Math.floor(safeUsableH / lineHeight));
+                            pageStep = linesPerPage * lineHeight;
+
+                            // Altura del texto puro sin el padding inferior de 100vh
+                            var contentEl = document.getElementById('content-wrapper');
+                            var textHeight = contentEl ? contentEl.offsetHeight : 1000;
+                            
+                            totalPages = Math.max(1, Math.ceil(textHeight / pageStep));
+
+                            console.log("📐 [Grilla Matemática] Líneas=" + linesPerPage + ", Paso=" + pageStep + "px, TotalPáginas=" + totalPages);
 
                             if (target === -1) {
                                 currentPage = totalPages - 1;
@@ -281,7 +316,7 @@ class ReaderViewModel(
                                 window.AndroidBridge.onPaginationReady(totalPages, currentPage);
                             }
                         } catch (e) {
-                            console.error("❌ Error en initPages: " + e.message);
+                            console.error("❌ Error initPages: " + e.message);
                         }
                     }
 
@@ -324,7 +359,7 @@ class ReaderViewModel(
                 </script>
             </head>
             <body>
-                <div id="book-container">
+                <div id="content-wrapper">
                     $bodyContent
                 </div>
             </body>
