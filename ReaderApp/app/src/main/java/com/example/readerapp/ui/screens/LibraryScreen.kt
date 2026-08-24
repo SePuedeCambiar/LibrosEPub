@@ -27,7 +27,8 @@ import java.io.File
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBookSelected: (String) -> Unit // <-- Nuevo parámetro
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -57,7 +58,16 @@ fun LibraryScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.localBooks) { book ->
-                    LocalBookCard(book = book, onOpenBook = { openBookFile(context, book) })
+                    LocalBookCard(
+                        book = book,
+                        onOpenBook = {
+                            if (book.extension.lowercase() == "epub" && book.localFilePath != null) {
+                                onBookSelected(book.localFilePath) // Abrir nuestro lector nativo
+                            } else {
+                                openBookFile(context, book) // PDF o error: usar app externa
+                            }
+                        }
+                    )
                 }
             }
         }
