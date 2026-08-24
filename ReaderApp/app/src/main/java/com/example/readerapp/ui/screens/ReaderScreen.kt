@@ -2,6 +2,7 @@ package com.example.readerapp.ui.screens
 
 import android.annotation.SuppressLint
 import android.util.Log
+import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -42,8 +43,9 @@ fun ReaderScreen(
 ) {
     var showSettings by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
-    var showControls by remember { mutableStateOf(true) }
+    var showControls by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var lastLoadedHtml by remember { mutableStateOf("") }
 
     val currentChapter = viewModel.book?.chapters?.getOrNull(viewModel.currentChapterIndex)
     val chapterTitle = currentChapter?.title ?: "Leyendo..."
@@ -56,15 +58,42 @@ fun ReaderScreen(
         ReaderTheme.SEPIA -> Color(0xFFF4ECD8)
     }
 
+    val nativeBgColor = when (viewModel.settings.theme) {
+        ReaderTheme.LIGHT -> android.graphics.Color.parseColor("#FAF8F5")
+        ReaderTheme.DARK -> android.graphics.Color.parseColor("#141414")
+        ReaderTheme.SEPIA -> android.graphics.Color.parseColor("#F4ECD8")
+    }
+
+    // Carga de contenido controlada y libre de loops
+    LaunchedEffect(viewModel.currentHtmlContent, webViewRef) {
+        val html = viewModel.currentHtmlContent
+        val webView = webViewRef
+        if (html.isNotEmpty() && webView != null && html != lastLoadedHtml) {
+            lastLoadedHtml = html
+            val baseUrl = "https://epub.local/${viewModel.currentChapterHref}"
+            Log.d("ReaderScreen", "📲 [Load] Cargando capítulo en WebView (${html.length} chars)")
+            webView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(bgColor)
     ) {
-        // 1. Lienzo de Lectura Estático
+        // 1. Lienzo del WebView
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    setBackgroundColor(nativeBgColor)
+                    isVerticalScrollBarEnabled = false
+                    isHorizontalScrollBarEnabled = false
+                    overScrollMode = WebView.OVER_SCROLL_NEVER
+
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                             Log.d("WebViewConsole", "🌐 [JS] ${consoleMessage?.message()}")
@@ -85,21 +114,24 @@ fun ReaderScreen(
                             return super.shouldInterceptRequest(view, request)
                         }
                     }
+
                     settings.javaScriptEnabled = true
                     addJavascriptInterface(viewModel.jsInterface, "AndroidBridge")
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = false
+                    settings.loadWithOverviewMode = false
                     settings.textZoom = 100
                     settings.setSupportZoom(false)
                     settings.builtInZoomControls = false
                     settings.displayZoomControls = false
+
                     webViewRef = this
                 }
             },
             update = { webView ->
-                webViewRef = webView
-                val baseUrl = "https://epub.local/${viewModel.currentChapterHref}"
-                webView.loadDataWithBaseURL(baseUrl, viewModel.currentHtmlContent, "text/html", "UTF-8", null)
+                webView.setBackgroundColor(nativeBgColor)
+                if (webViewRef != webView) {
+                    webViewRef = webView
+                }
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -125,7 +157,7 @@ fun ReaderScreen(
                     }
             )
 
-            // Centro (40%): Alternar barras
+            // Centro (40%): Mostrar / Ocultar controles
             Box(
                 modifier = Modifier
                     .fillMaxHeight()
@@ -158,7 +190,7 @@ fun ReaderScreen(
             )
         }
 
-        // 3. Barra Superior Flotante
+        // 3. Barra Superior
         AnimatedVisibility(
             visible = showControls,
             enter = slideInVertically(initialOffsetY = { -it }),
@@ -200,7 +232,7 @@ fun ReaderScreen(
             )
         }
 
-        // 4. Barra Inferior Flotante
+        // 4. Barra Inferior
         AnimatedVisibility(
             visible = showControls,
             enter = slideInVertically(initialOffsetY = { it }),
@@ -241,7 +273,7 @@ fun ReaderScreen(
             }
         }
 
-        // 5. Modales
+        // 5. Modal de Índice
         if (showToc) {
             AlertDialog(
                 onDismissRequest = { showToc = false },
@@ -278,6 +310,7 @@ fun ReaderScreen(
             )
         }
 
+        // 6. Modal de Ajustes
         if (showSettings) {
             ReaderSettingsDialog(
                 currentSettings = viewModel.settings,
@@ -299,7 +332,7 @@ fun ReaderSettingsDialog(
     onSave: (ReaderSettings) -> Unit
 ) {
     var theme by remember { mutableStateOf(currentSettings.theme) }
-    var fontSize by remember { mutableStateOf(currentSettings.fontSize) }
+    var fontSize by remember { mutableIntStateOf(currentSettings.fontSize) }
     var font by remember { mutableStateOf(currentSettings.font) }
 
     AlertDialog(
@@ -342,6 +375,11 @@ fun ReaderSettingsDialog(
                 onSave(currentSettings.copy(theme = theme, fontSize = fontSize, font = font))
             }) {
                 Text("Aplicar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
             }
         }
     )
