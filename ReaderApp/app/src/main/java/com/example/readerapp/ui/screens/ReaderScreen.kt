@@ -87,8 +87,8 @@ fun ReaderScreen(
                     }
                     settings.javaScriptEnabled = true
                     addJavascriptInterface(viewModel.jsInterface, "AndroidBridge")
-                    settings.useWideViewPort = false
-                    settings.loadWithOverviewMode = false
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
                     settings.textZoom = 100
                     settings.setSupportZoom(false)
                     settings.builtInZoomControls = false

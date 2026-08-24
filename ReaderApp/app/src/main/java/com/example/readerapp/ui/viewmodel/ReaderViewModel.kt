@@ -66,7 +66,10 @@ class ReaderViewModel(
             chapterCurrentPage = current
             isChapterLoading = false
             updateGlobalPage()
-            Log.d(tag, "📡 [Bridge] Paginación lista -> Cap ${currentChapterIndex + 1}: Pág ${current + 1} de $total")
+            Log.d(
+                tag,
+                "📡 [Bridge] Paginación lista -> Cap ${currentChapterIndex + 1}: Pág ${current + 1} de $total"
+            )
         }
 
         @JavascriptInterface
@@ -74,7 +77,10 @@ class ReaderViewModel(
             chapterCurrentPage = current
             chapterTotalPages = maxOf(1, total)
             updateGlobalPage()
-            Log.d(tag, "📡 [Bridge] Pág: ${current + 1} / $total (Capítulo ${currentChapterIndex + 1})")
+            Log.d(
+                tag,
+                "📡 [Bridge] Pág: ${current + 1} / $total (Capítulo ${currentChapterIndex + 1})"
+            )
         }
     }
 
@@ -92,12 +98,19 @@ class ReaderViewModel(
             }
             val zip = zipInstance ?: return null
             val clean = path.substringBefore("#")
-            val decoded = try { URLDecoder.decode(clean, "UTF-8") } catch (_: Exception) { clean }
+            val decoded = try {
+                URLDecoder.decode(clean, "UTF-8")
+            } catch (_: Exception) {
+                clean
+            }
 
             val entry = zip.getEntry(clean)
                 ?: zip.getEntry(decoded)
                 ?: zip.entries().asSequence().firstOrNull {
-                    it.name.equals(clean, ignoreCase = true) || it.name.equals(decoded, ignoreCase = true)
+                    it.name.equals(clean, ignoreCase = true) || it.name.equals(
+                        decoded,
+                        ignoreCase = true
+                    )
                 }
 
             if (entry != null) {
@@ -122,7 +135,8 @@ class ReaderViewModel(
         try {
             zipInstance?.close()
             zipInstance = null
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
     private fun loadBook() {
@@ -156,8 +170,12 @@ class ReaderViewModel(
     private fun updateGlobalPage() {
         val currentBook = book ?: return
         val chapter = currentBook.chapters.getOrNull(currentChapterIndex) ?: return
-        val offset = (chapterCurrentPage.toFloat() / maxOf(1, chapterTotalPages) * chapter.estimatedPages).toInt()
-        globalCurrentPage = (chapter.startGlobalPage + offset).coerceIn(1, currentBook.totalEstimatedPages)
+        val offset = (chapterCurrentPage.toFloat() / maxOf(
+            1,
+            chapterTotalPages
+        ) * chapter.estimatedPages).toInt()
+        globalCurrentPage =
+            (chapter.startGlobalPage + offset).coerceIn(1, currentBook.totalEstimatedPages)
     }
 
     fun onNextChapterRequested() {
@@ -218,152 +236,155 @@ class ReaderViewModel(
         }
 
         val fontSize = settings.fontSize
-        val lineHeight = Math.round(fontSize * 1.75).toInt() // ej: 18px -> 32px exactos
+        val lineHeight = Math.round(fontSize * 1.6).toInt()
 
         return """
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                <style>
-                    * {
-                        box-sizing: border-box !important;
-                    }
-                    html {
-                        margin: 0 !important;
-                        padding: 0 !important;
-                        background-color: $bgColor !important;
-                    }
-                    body {
-                        margin: 0 !important;
-                        /* 40px arriba para librar barra superior, 100vh abajo para que la última página nunca se frene */
-                        padding: 40px 24px 100vh 24px !important;
-                        background-color: $bgColor !important;
-                        color: $textColor !important;
-                        font-family: $fontFace !important;
-                        font-size: ${fontSize}px !important;
-                        line-height: ${lineHeight}px !important;
-                        text-align: justify !important;
-                        word-break: break-word !important;
-                    }
-                    #content-wrapper * {
-                        color: inherit !important;
-                        max-width: 100% !important;
-                    }
-                    /* REGLA EDITORIAL ESTRICTA: Cero márgenes variables para eliminar deriva de línea */
-                    p {
-                        margin: 0 !important;
-                        padding: 0 !important;
-                        line-height: ${lineHeight}px !important;
-                        text-indent: 1.4em !important;
-                    }
-                    p:empty {
-                        display: none !important;
-                    }
-                    h1, h2, h3, h4 {
-                        text-align: center !important;
-                        text-indent: 0 !important;
-                        line-height: ${lineHeight * 2}px !important;
-                        margin: ${lineHeight}px 0 !important;
-                        padding: 0 !important;
-                    }
-                    div, section, article {
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
-                    img, svg {
-                        max-width: 100% !important;
-                        max-height: ${lineHeight * 12}px !important;
-                        height: auto !important;
-                        display: block !important;
-                        margin: ${lineHeight}px auto !important;
-                    }
-                </style>
-                <script>
-                    var totalPages = 1;
-                    var currentPage = 0;
-                    var pageStep = 0;
-                    var lineHeight = $lineHeight;
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <style>
+                * { box-sizing: border-box !important; }
+                
+                html {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    background-color: $bgColor !important;
+                    /* Quitamos overflow: hidden aquí para evitar que el WebView colapse el render */
+                }
 
-                    function initPages(target) {
-                        try {
-                            var viewH = window.innerHeight || 700;
-                            
-                            // Espacio útil: Altura de la pantalla menos 40px arriba y 80px abajo
-                            var safeUsableH = Math.max(lineHeight * 5, viewH - 120);
-                            
-                            // Número EXACTO de líneas que caben sin cortar ninguna
-                            var linesPerPage = Math.max(1, Math.floor(safeUsableH / lineHeight));
-                            pageStep = linesPerPage * lineHeight;
+                body {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    background-color: $bgColor !important;
+                    color: $textColor !important;
+                    font-family: $fontFace !important;
+                    font-size: ${fontSize}px !important;
+                    line-height: ${lineHeight}px !important;
+                    text-align: justify !important;
+                    
+                    /* Permitimos que el body sea el contenedor del scroll horizontal */
+                    width: auto !important;
+                    overflow-x: auto !important;
+                    overflow-y: hidden !important;
+                }
 
-                            // Altura del texto puro sin el padding inferior de 100vh
-                            var contentEl = document.getElementById('content-wrapper');
-                            var textHeight = contentEl ? contentEl.offsetHeight : 1000;
-                            
-                            totalPages = Math.max(1, Math.ceil(textHeight / pageStep));
+                #content-wrapper {
+                    padding: 40px 24px !important;
+                    
+                    /* Columnas */
+                    display: block !important;
+                    column-width: 100vw !important; 
+                    column-gap: 0px !important;
+                    column-fill: auto !important;
+                    
+                    /* El JS asignará la altura exacta aquí */
+                    height: 100% !important; 
+                    background-color: $bgColor !important;
+                }
 
-                            console.log("📐 [Grilla Matemática] Líneas=" + linesPerPage + ", Paso=" + pageStep + "px, TotalPáginas=" + totalPages);
+                p {
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    line-height: ${lineHeight}px !important;
+                    text-indent: 1.4em !important;
+                    break-inside: auto !important;
+                }
 
-                            if (target === -1) {
-                                currentPage = totalPages - 1;
-                            } else {
-                                currentPage = Math.min(Math.max(0, target), totalPages - 1);
-                            }
+                h1, h2, h3, h4 {
+                    text-align: center !important;
+                    text-indent: 0 !important;
+                    line-height: ${lineHeight * 1.5}px !important;
+                    margin: ${lineHeight}px 0 !important;
+                    break-inside: avoid !important;
+                }
 
-                            applyScroll();
+                img {
+                    max-width: 100% !important;
+                    height: auto !important;
+                    display: block !important;
+                    margin: 10px auto !important;
+                    break-inside: avoid !important;
+                }
+            </style>
+            <script>
+                var totalPages = 1;
+                var currentPage = 0;
 
-                            if (window.AndroidBridge) {
-                                window.AndroidBridge.onPaginationReady(totalPages, currentPage);
-                            }
-                        } catch (e) {
-                            console.error("❌ Error initPages: " + e.message);
+                function initPages(target) {
+                    try {
+                        var viewH = window.innerHeight;
+                        var viewW = window.innerWidth;
+                        
+                        var wrapper = document.getElementById('content-wrapper');
+                        
+                        // IMPORTANTE: Aplicamos la altura al wrapper Y al body
+                        // Esto evita que el contenido desaparezca en algunas versiones de Android
+                        document.body.style.height = viewH + "px";
+                        wrapper.style.height = (viewH - 1) + "px";
+
+                        var scrollWidth = document.documentElement.scrollWidth;
+                        if (scrollWidth <= viewW) {
+                            scrollWidth = wrapper.scrollWidth;
                         }
-                    }
+                        
+                        totalPages = Math.max(1, Math.ceil(scrollWidth / viewW));
+                        currentPage = Math.min(Math.max(0, target), totalPages - 1);
+                        
+                        applyScroll();
 
-                    function applyScroll() {
-                        var targetY = currentPage * pageStep;
-                        window.scrollTo({
-                            top: targetY,
-                            left: 0,
-                            behavior: 'instant'
-                        });
-                    }
-
-                    function nextPage() {
-                        if (currentPage < totalPages - 1) {
-                            currentPage++;
-                            applyScroll();
-                            if (window.AndroidBridge) {
-                                window.AndroidBridge.onPageChanged(currentPage, totalPages);
-                            }
-                            return true;
+                        if (window.AndroidBridge) {
+                            window.AndroidBridge.onPaginationReady(totalPages, currentPage);
                         }
-                        return false;
+                    } catch (e) {
+                        console.error("Error initPages: " + e.message);
                     }
+                }
 
-                    function prevPage() {
-                        if (currentPage > 0) {
-                            currentPage--;
-                            applyScroll();
-                            if (window.AndroidBridge) {
-                                window.AndroidBridge.onPageChanged(currentPage, totalPages);
-                            }
-                            return true;
-                        }
-                        return false;
-                    }
-
-                    window.addEventListener('load', function() {
-                        setTimeout(function() { initPages($startPage); }, 80);
+                function applyScroll() {
+                    var targetX = currentPage * window.innerWidth;
+                    window.scrollTo({
+                        top: 0,
+                        left: targetX,
+                        behavior: 'instant'
                     });
-                </script>
-            </head>
-            <body>
-                <div id="content-wrapper">
-                    $bodyContent
-                </div>
-            </body>
-            </html>
-        """.trimIndent()
+                }
+
+                function nextPage() {
+                    if (currentPage < totalPages - 1) {
+                        currentPage++;
+                        applyScroll();
+                        if (window.AndroidBridge) {
+                            window.AndroidBridge.onPageChanged(currentPage, totalPages);
+                        }
+                        return true;
+                    }
+                    return false;
+                }
+
+                function prevPage() {
+                    if (currentPage > 0) {
+                        currentPage--;
+                        applyScroll();
+                        if (window.AndroidBridge) {
+                            window.AndroidBridge.onPageChanged(currentPage, totalPages);
+                        }
+                        return true;
+                    }
+                    return false;
+                }
+
+                window.addEventListener('load', function() {
+                    setTimeout(function() { initPages($startPage); }, 300);
+                });
+            </script>
+        </head>
+        <body>
+            <div id="content-wrapper">
+                $bodyContent
+            </div>
+        </body>
+        </html>
+    """.trimIndent()
     }
 }
