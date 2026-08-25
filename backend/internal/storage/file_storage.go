@@ -13,29 +13,24 @@ import (
 	"unicode"
 )
 
-// StorageService define el contrato de almacenamiento (ISP / DIP).
-// Cualquier handler o caso de uso dependerá de esta interfaz, no de la implementación concreta en disco.
 type StorageService interface {
 	SaveFromURL(ctx context.Context, downloadURL, title, extension string) (*models.DownloadResponse, error)
 	GetBasePath() string
 }
 
-// LocalFileStorage implementa StorageService guardando archivos en el sistema de archivos local.
 type LocalFileStorage struct {
 	baseDir string
 	client  *http.Client
 }
 
-// NewLocalFileStorage es el constructor con inyección de dependencias.
 func NewLocalFileStorage(baseDir string, client *http.Client) (*LocalFileStorage, error) {
-	// Aseguramos que el directorio de destino exista
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("no se pudo crear el directorio de almacenamiento '%s': %w", baseDir, err)
 	}
 
 	if client == nil {
 		client = &http.Client{
-			Timeout: 120 * time.Second, // Timeout amplio para descargas de archivos grandes
+			Timeout: 120 * time.Second,
 		}
 	}
 
@@ -45,25 +40,18 @@ func NewLocalFileStorage(baseDir string, client *http.Client) (*LocalFileStorage
 	}, nil
 }
 
-// GetBasePath retorna la ruta del directorio base donde Syncthing sincroniza
 func (s *LocalFileStorage) GetBasePath() string {
 	return s.baseDir
 }
 
-// SaveFromURL descarga el archivo en streaming directamente al disco
 func (s *LocalFileStorage) SaveFromURL(ctx context.Context, downloadURL, title, extension string) (*models.DownloadResponse, error) {
 	startTime := time.Now()
 
-	// 1. Sanitizar el nombre del archivo para que sea válido en cualquier sistema operativo (Linux/Android)
-	fileName := s.sanitizeFileName(title, extension)
-	targetPath := filepath.Join(s.baseDir, fileName)
-
-	// 2. Iniciar la petición HTTP respetando el contexto de cancelación
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error preparando petición de descarga: %w", err)
 	}
-	req.Header.Set("User-Agent", "EbookAggregator/1.0 (reader-ecosystem)")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ReaderEcosystem/1.0")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -75,13 +63,31 @@ func (s *LocalFileStorage) SaveFromURL(ctx context.Context, downloadURL, title, 
 		return nil, fmt.Errorf("el servidor de descarga respondió con código HTTP %d", resp.StatusCode)
 	}
 
-	// 3. Crear el archivo en disco
+	// ========================================================================
+	// DETECCIÓN INTELIGENTE DE EXTENSIÓN (MIME TYPE)
+	// ========================================================================
+	contentType := resp.Header.Get("Content-Type")
+	finalExt := extension
+
+	switch {
+	case strings.Contains(contentType, "application/pdf"):
+		finalExt = "pdf"
+	case strings.Contains(contentType, "application/epub+zip"):
+		finalExt = "epub"
+	case strings.Contains(contentType, "application/x-mobipocket-ebook") || strings.Contains(contentType, "kindle"):
+		finalExt = "mobi"
+	}
+	// ========================================================================
+
+	// Usamos la extensión detectada (finalExt) en lugar de la solicitada (extension)
+	fileName := s.sanitizeFileName(title, finalExt)
+	targetPath := filepath.Join(s.baseDir, fileName)
+
 	out, err := os.Create(targetPath)
 	if err != nil {
 		return nil, fmt.Errorf("error creando archivo en disco '%s': %w", targetPath, err)
 	}
 
-	// Si algo falla a mitad de la descarga, cerramos y borramos el archivo incompleto
 	var success bool
 	defer func() {
 		out.Close()
@@ -90,7 +96,6 @@ func (s *LocalFileStorage) SaveFromURL(ctx context.Context, downloadURL, title, 
 		}
 	}()
 
-	// 4. Streaming directo de la red al disco (Consumo de RAM constante < 2MB)
 	bytesWritten, err := io.Copy(out, resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error escribiendo el flujo de datos en disco: %w", err)
@@ -109,13 +114,10 @@ func (s *LocalFileStorage) SaveFromURL(ctx context.Context, downloadURL, title, 
 	}, nil
 }
 
-// sanitizeFileName elimina caracteres problemáticos y asegura que tenga la extensión correcta
 func (s *LocalFileStorage) sanitizeFileName(title, extension string) string {
-	// Normalizar espacios y minúsculas
 	clean := strings.TrimSpace(strings.ToLower(title))
 	clean = strings.ReplaceAll(clean, " ", "_")
 
-	// Conservar solo letras, números, guiones y guiones bajos
 	var builder strings.Builder
 	for _, r := range clean {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
@@ -128,7 +130,6 @@ func (s *LocalFileStorage) sanitizeFileName(title, extension string) string {
 		result = fmt.Sprintf("libro_%d", time.Now().Unix())
 	}
 
-	// Asegurar extensión
 	ext := strings.TrimPrefix(strings.ToLower(extension), ".")
 	if ext == "" {
 		ext = "epub"
