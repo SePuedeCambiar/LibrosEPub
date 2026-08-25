@@ -66,6 +66,10 @@ class ReaderViewModel(
             chapterCurrentPage = current
             isChapterLoading = false
             updateGlobalPage()
+
+            // Guardar progreso inicial al cargar el capítulo
+            preferences.saveReadingProgress(bookFile.absolutePath, currentChapterIndex, current)
+
             Log.d(tag, "📡 [Bridge] Paginación lista -> Cap ${currentChapterIndex + 1}: Pág ${current + 1} de $total")
         }
 
@@ -74,6 +78,10 @@ class ReaderViewModel(
             chapterCurrentPage = current
             chapterTotalPages = maxOf(1, total)
             updateGlobalPage()
+
+            // GUARDADO DE PROGRESO: Actualizamos la preferencia cada vez que el usuario pasa página
+            preferences.saveReadingProgress(bookFile.absolutePath, currentChapterIndex, current)
+
             Log.d(tag, "📡 [Bridge] Pág: ${current + 1} / $total (Capítulo ${currentChapterIndex + 1})")
         }
     }
@@ -134,7 +142,19 @@ class ReaderViewModel(
             book = parsedBook
             if (parsedBook != null && parsedBook.chapters.isNotEmpty()) {
                 Log.d(tag, "📖 Libro cargado: '${parsedBook.title}' (${parsedBook.chapters.size} capítulos)")
-                loadChapter(0, 0)
+
+                // RECUPERACIÓN DE PROGRESO:
+                // Buscamos si hay una posición guardada para este archivo específico
+                val savedProgress = preferences.getReadingProgress(bookFile.absolutePath)
+                if (savedProgress != null) {
+                    val (savedChapter, savedPage) = savedProgress
+                    Log.d(tag, "📍 Progreso recuperado: Cap $savedChapter, Pág $savedPage")
+                    loadChapter(savedChapter, savedPage)
+                } else {
+                    // Si es la primera vez que se abre, empezamos desde el inicio
+                    loadChapter(0, 0)
+                }
+
             } else {
                 Log.e(tag, "❌ Error: No se pudo parsear el archivo EPUB")
             }

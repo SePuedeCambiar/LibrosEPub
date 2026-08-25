@@ -11,7 +11,7 @@ class AppPreferences(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("reader_settings", Context.MODE_PRIVATE)
 
-    // --- Ajustes del Servidor (Existentes) ---
+    // --- Ajustes del Servidor ---
     var serverUrl: String
         get() = prefs.getString("server_url", "http://192.168.1.100:8080/") ?: "http://192.168.1.100:8080/"
         set(value) = prefs.edit().putString("server_url", formatUrl(value)).apply()
@@ -20,7 +20,7 @@ class AppPreferences(context: Context) {
         get() = prefs.getBoolean("use_server_mode", false)
         set(value) = prefs.edit().putBoolean("use_server_mode", value).apply()
 
-    // --- Ajustes del Lector (Nuevos) ---
+    // --- Ajustes del Lector ---
 
     /**
      * Recupera toda la configuración del lector.
@@ -55,6 +55,38 @@ class AppPreferences(context: Context) {
             apply()
         }
     }
+
+    // --- Progreso de Lectura ---
+
+    /**
+     * Guarda la posición actual de lectura de un libro.
+     * Usamos la ruta del archivo como clave única para identificar el libro.
+     * Formato: "indice_capitulo|indice_pagina"
+     */
+    fun saveReadingProgress(bookPath: String, chapterIndex: Int, pageIndex: Int) {
+        val progressValue = "$chapterIndex|$pageIndex"
+        prefs.edit().putString("progress_$bookPath", progressValue).apply()
+    }
+
+    /**
+     * Recupera la última posición guardada para un libro.
+     * @return Pair(indice_capitulo, indice_pagina) o null si es la primera vez que se lee.
+     */
+    fun getReadingProgress(bookPath: String): Pair<Int, Int>? {
+        val progressValue = prefs.getString("progress_$bookPath", null) ?: return null
+        return try {
+            val parts = progressValue.split("|")
+            if (parts.size == 2) {
+                Pair(parts[0].toInt(), parts[1].toInt())
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    // --- Helpers Privados ---
 
     private fun formatUrl(input: String): String {
         var clean = input.trim()
