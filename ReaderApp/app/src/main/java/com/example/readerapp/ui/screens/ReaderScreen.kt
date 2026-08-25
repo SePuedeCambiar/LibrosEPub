@@ -57,9 +57,12 @@ fun ReaderScreen(
     val scope = rememberCoroutineScope()
 
     // Carga de página PDF (se mantiene igual, funciona bien)
+    // En ReaderScreen.kt al cambiar de página:
     LaunchedEffect(viewModel.chapterCurrentPage, viewModel.isPdf) {
         if (viewModel.isPdf) {
+            val oldBitmap = pdfPageBitmap
             pdfPageBitmap = viewModel.renderPdfPage(viewModel.chapterCurrentPage)
+            oldBitmap?.recycle() // Liberar memoria nativa de inmediato
         }
     }
 
