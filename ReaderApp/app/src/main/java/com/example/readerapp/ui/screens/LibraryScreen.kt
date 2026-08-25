@@ -61,10 +61,11 @@ fun LibraryScreen(
                     LocalBookCard(
                         book = book,
                         onOpenBook = {
-                            if (book.extension.lowercase() == "epub" && book.localFilePath != null) {
-                                onBookSelected(book.localFilePath) // Abrir nuestro lector nativo
+                            val ext = book.extension.lowercase()
+                            if ((ext == "epub" || ext == "pdf") && book.localFilePath != null) {
+                                onBookSelected(book.localFilePath) // Ahora el PDF también entra a nuestro lector
                             } else {
-                                openBookFile(context, book) // PDF o error: usar app externa
+                                openBookFile(context, book) // Solo archivos desconocidos van a app externa
                             }
                         }
                     )

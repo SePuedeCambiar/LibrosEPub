@@ -1,16 +1,29 @@
 package com.example.readerapp
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.readerapp.data.local.AppPreferences
 import com.example.readerapp.data.local.DirectDownloader
@@ -49,11 +62,59 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             ReaderAppTheme {
+                val context = LocalContext.current
+                val lifecycleOwner = LocalLifecycleOwner.current
+
+                var hasStoragePermission by remember { mutableStateOf(checkStoragePermission(context)) }
+                var showPermissionDialog by remember { mutableStateOf(!hasStoragePermission) }
+
                 var selectedTab by remember { mutableIntStateOf(0) }
                 var showSettings by remember { mutableStateOf(false) }
-
-                // ESTADO DE NAVEGACIÓN: Guarda la ruta del libro que se está leyendo
                 var readingBookPath by remember { mutableStateOf<String?>(null) }
+
+                // Escuchar cuando el usuario regresa de Ajustes para revalidar el permiso
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            val granted = checkStoragePermission(context)
+                            hasStoragePermission = granted
+                            showPermissionDialog = !granted
+                            if (granted) {
+                                libraryViewModel.refreshLocalBooks()
+                            }
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
+
+                // Diálogo para pedir permiso de almacenamiento en Android 11+ / Android 15
+                if (showPermissionDialog) {
+                    AlertDialog(
+                        onDismissRequest = { /* Forzar atención del usuario */ },
+                        icon = { Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(36.dp)) },
+                        title = { Text("Permiso de Archivos Necesario") },
+                        text = {
+                            Text(
+                                "Para que ReaderApp pueda detectar y abrir tus libros EPUB y documentos PDF en la carpeta de Descargas/Syncthing, se necesita acceso a los archivos del dispositivo."
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                requestStoragePermission(context)
+                            }) {
+                                Text("Conceder Acceso")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showPermissionDialog = false }) {
+                                Text("Más tarde")
+                            }
+                        }
+                    )
+                }
 
                 if (showSettings) {
                     SettingsDialog(
@@ -62,19 +123,16 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                // SI hay un libro seleccionado, mostramos el Lector y ocultamos el Scaffold principal
                 if (readingBookPath != null) {
-                    // Creamos el ViewModel del lector pasando el archivo actual
                     val readerViewModel: ReaderViewModel = viewModel(
                         factory = ReaderViewModelFactory(application, File(readingBookPath!!))
                     )
 
                     ReaderScreen(
                         viewModel = readerViewModel,
-                        onBack = { readingBookPath = null } // Volver a la biblioteca
+                        onBack = { readingBookPath = null }
                     )
                 } else {
-                    // VISTA PRINCIPAL (Buscador y Biblioteca)
                     Scaffold(
                         topBar = {
                             TopAppBar(
@@ -111,7 +169,7 @@ class MainActivity : ComponentActivity() {
                             1 -> LibraryScreen(
                                 viewModel = libraryViewModel,
                                 modifier = Modifier.padding(innerPadding),
-                                onBookSelected = { path -> readingBookPath = path } // Acción para abrir el lector
+                                onBookSelected = { path -> readingBookPath = path }
                             )
                         }
                     }
@@ -119,11 +177,30 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun checkStoragePermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            true
+        }
+    }
+
+    private fun requestStoragePermission(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                val fallbackIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                context.startActivity(fallbackIntent)
+            }
+        }
+    }
 }
 
-/**
- * Factory necesaria para crear el ReaderViewModel ya que recibe un parámetro (el archivo).
- */
 class ReaderViewModelFactory(private val app: android.app.Application, private val file: File) : androidx.lifecycle.ViewModelProvider.Factory {
     override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
         return ReaderViewModel(app, file) as T
