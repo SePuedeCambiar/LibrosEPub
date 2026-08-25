@@ -1,19 +1,17 @@
 package com.example.readerapp.ui.screens
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
 import android.util.Log
 import android.view.ViewGroup
-import android.webkit.ConsoleMessage
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,13 +24,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.readerapp.domain.model.ReaderFont
 import com.example.readerapp.domain.model.ReaderSettings
 import com.example.readerapp.domain.model.ReaderTheme
 import com.example.readerapp.ui.viewmodel.ReaderViewModel
+import kotlinx.coroutines.launch
 
 @SuppressLint("SetJavaScriptEnabled")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,12 +49,24 @@ fun ReaderScreen(
     var showToc by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
+    // Guardamos el último HTML cargado para evitar recargas infinitas en el bloque update
     var lastLoadedHtml by remember { mutableStateOf("") }
 
+    var pdfPageBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val scope = rememberCoroutineScope()
+
+    // Carga de página PDF (se mantiene igual, funciona bien)
+    LaunchedEffect(viewModel.chapterCurrentPage, viewModel.isPdf) {
+        if (viewModel.isPdf) {
+            pdfPageBitmap = viewModel.renderPdfPage(viewModel.chapterCurrentPage)
+        }
+    }
+
     val currentChapter = viewModel.book?.chapters?.getOrNull(viewModel.currentChapterIndex)
-    val chapterTitle = currentChapter?.title ?: "Leyendo..."
-    val totalChapters = viewModel.book?.chapters?.size ?: 1
-    val totalGlobal = viewModel.book?.totalEstimatedPages ?: 1
+    val chapterTitle = if (viewModel.isPdf) "Documento PDF" else (currentChapter?.title ?: "Leyendo...")
+    val totalChapters = if (viewModel.isPdf) 1 else (viewModel.book?.chapters?.size ?: 1)
+    val totalGlobal = if (viewModel.isPdf) viewModel.chapterTotalPages else (viewModel.book?.totalEstimatedPages ?: 1)
 
     val bgColor = when (viewModel.settings.theme) {
         ReaderTheme.LIGHT -> Color(0xFFFAF8F5)
@@ -64,15 +80,27 @@ fun ReaderScreen(
         ReaderTheme.SEPIA -> android.graphics.Color.parseColor("#F4ECD8")
     }
 
-    // Carga de contenido controlada y libre de loops
-    LaunchedEffect(viewModel.currentHtmlContent, webViewRef) {
-        val html = viewModel.currentHtmlContent
-        val webView = webViewRef
-        if (html.isNotEmpty() && webView != null && html != lastLoadedHtml) {
-            lastLoadedHtml = html
-            val baseUrl = "https://epub.local/${viewModel.currentChapterHref}"
-            Log.d("ReaderScreen", "📲 [Load] Cargando capítulo en WebView (${html.length} chars)")
-            webView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
+    val pdfColorFilter = remember(viewModel.settings.theme) {
+        when (viewModel.settings.theme) {
+            ReaderTheme.DARK -> {
+                val matrix = ColorMatrix(floatArrayOf(
+                    -1f, 0f, 0f, 0f, 255f,
+                    0f, -1f, 0f, 0f, 255f,
+                    0f, 0f, -1f, 0f, 255f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                ColorFilter.colorMatrix(matrix)
+            }
+            ReaderTheme.SEPIA -> {
+                val matrix = ColorMatrix(floatArrayOf(
+                    0.393f, 0.769f, 0.189f, 0f, 0f,
+                    0.349f, 0.686f, 0.168f, 0f, 0f,
+                    0.272f, 0.534f, 0.131f, 0f, 0f,
+                    0f, 0f, 0f, 1f, 0f
+                ))
+                ColorFilter.colorMatrix(matrix)
+            }
+            ReaderTheme.LIGHT -> null
         }
     }
 
@@ -81,116 +109,131 @@ fun ReaderScreen(
             .fillMaxSize()
             .background(bgColor)
     ) {
-        // 1. Lienzo del WebView
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
+        if (viewModel.isPdf) {
+            var scale by remember { mutableStateOf(1f) }
+            val state = rememberTransformableState { zoomChange, _, _ ->
+                scale = (scale * zoomChange).coerceIn(1f, 3f)
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .transformable(state = state)
+                    .clickable { showControls = !showControls },
+                contentAlignment = Alignment.Center
+            ) {
+                pdfPageBitmap?.let { bitmap ->
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "PDF Page",
+                        modifier = Modifier.fillMaxSize().scale(scale),
+                        contentScale = ContentScale.Fit,
+                        colorFilter = pdfColorFilter
                     )
-                    setBackgroundColor(nativeBgColor)
-                    isVerticalScrollBarEnabled = false
-                    isHorizontalScrollBarEnabled = false
-                    overScrollMode = WebView.OVER_SCROLL_NEVER
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
-                            Log.d("WebViewConsole", "🌐 [JS] ${consoleMessage?.message()}")
-                            return true
-                        }
-                    }
-
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                            val url = request?.url ?: return null
-                            if (url.scheme == "https" && url.host == "epub.local") {
-                                val path = url.path?.removePrefix("/") ?: return null
-                                val asset = viewModel.getAssetInputStream(path)
-                                if (asset != null) {
-                                    return WebResourceResponse(asset.first, "UTF-8", asset.second)
-                                }
-                            }
-                            return super.shouldInterceptRequest(view, request)
-                        }
-                    }
-
-                    settings.javaScriptEnabled = true
-                    addJavascriptInterface(viewModel.jsInterface, "AndroidBridge")
-                    settings.useWideViewPort = false
-                    settings.loadWithOverviewMode = false
-                    settings.textZoom = 100
-                    settings.setSupportZoom(false)
-                    settings.builtInZoomControls = false
-                    settings.displayZoomControls = false
-
-                    webViewRef = this
+                } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
-            },
-            update = { webView ->
-                webView.setBackgroundColor(nativeBgColor)
-                if (webViewRef != webView) {
-                    webViewRef = webView
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // 2. Capa de Toques
-        Row(modifier = Modifier.fillMaxSize()) {
-            // Izquierda (30%): Retroceder página
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(0.3f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        if (!viewModel.isChapterLoading) {
-                            webViewRef?.evaluateJavascript("typeof prevPage === 'function' ? prevPage() : 'loading'") { result ->
-                                if (result == "false") {
-                                    viewModel.onPrevChapterRequested()
-                                }
+            }
+        } else {
+            // --- VISOR DE EPUB CORREGIDO ---
+            AndroidView(
+                factory = { context ->
+                    WebView(context).apply {
+                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        setBackgroundColor(nativeBgColor)
+                        isVerticalScrollBarEnabled = false
+                        isHorizontalScrollBarEnabled = false
+                        overScrollMode = WebView.OVER_SCROLL_NEVER
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                                Log.d("WebViewConsole", "🌐 [JS] ${consoleMessage?.message()}")
+                                return true
                             }
                         }
-                    }
-            )
-
-            // Centro (40%): Mostrar / Ocultar controles
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(0.4f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        showControls = !showControls
-                    }
-            )
-
-            // Derecha (30%): Avanzar página
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .weight(0.3f)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        if (!viewModel.isChapterLoading) {
-                            webViewRef?.evaluateJavascript("typeof nextPage === 'function' ? nextPage() : 'loading'") { result ->
-                                if (result == "false") {
-                                    viewModel.onNextChapterRequested()
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                                val url = request?.url ?: return null
+                                if (url.scheme == "https" && url.host == "epub.local") {
+                                    val path = url.path?.removePrefix("/") ?: return null
+                                    val asset = viewModel.getAssetInputStream(path)
+                                    if (asset != null) return WebResourceResponse(asset.first, "UTF-8", asset.second)
                                 }
+                                return super.shouldInterceptRequest(view, request)
                             }
                         }
+                        settings.javaScriptEnabled = true
+                        addJavascriptInterface(viewModel.jsInterface, "AndroidBridge")
+                        settings.useWideViewPort = false
+                        settings.loadWithOverviewMode = false
+                        settings.textZoom = 100
+                        settings.setSupportZoom(false)
+                        settings.builtInZoomControls = false
+                        settings.displayZoomControls = false
+                        webViewRef = this
                     }
+                },
+                update = { webView ->
+                    // 1. Actualizar color de fondo
+                    webView.setBackgroundColor(nativeBgColor)
+
+                    // 2. CARGA DEL CONTENIDO (Aquí es donde estaba el fallo)
+                    val html = viewModel.currentHtmlContent
+                    if (html.isNotEmpty() && html != lastLoadedHtml) {
+                        val baseUrl = "https://epub.local/${viewModel.currentChapterHref}"
+                        webView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
+                        lastLoadedHtml = html // Marcamos como cargado
+                    }
+
+                    if (webViewRef != webView) webViewRef = webView
+                },
+                modifier = Modifier.fillMaxSize()
             )
         }
 
-        // 3. Barra Superior
+        // Capa de Toques
+        Row(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier.fillMaxHeight().weight(0.3f).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    if (!viewModel.isChapterLoading) {
+                        if (viewModel.isPdf) {
+                            viewModel.onPrevChapterRequested()
+                        } else {
+                            webViewRef?.evaluateJavascript("typeof prevPage === 'function' ? prevPage() : 'loading'") { result ->
+                                if (result == "false") viewModel.onPrevChapterRequested()
+                            }
+                        }
+                    }
+                }
+            )
+            Box(
+                modifier = Modifier.fillMaxHeight().weight(0.4f).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    showControls = !showControls
+                }
+            )
+            Box(
+                modifier = Modifier.fillMaxHeight().weight(0.3f).clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    if (!viewModel.isChapterLoading) {
+                        if (viewModel.isPdf) {
+                            viewModel.onNextChapterRequested()
+                        } else {
+                            webViewRef?.evaluateJavascript("typeof nextPage === 'function' ? nextPage() : 'loading'") { result ->
+                                if (result == "false") viewModel.onNextChapterRequested()
+                            }
+                        }
+                    }
+                }
+            )
+        }
+
         AnimatedVisibility(
             visible = showControls,
             enter = slideInVertically(initialOffsetY = { -it }),
@@ -200,39 +243,23 @@ fun ReaderScreen(
             TopAppBar(
                 title = {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = viewModel.book?.title ?: "Cargando...",
-                            style = MaterialTheme.typography.titleSmall,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = chapterTitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
+                        Text(text = viewModel.book?.title ?: "Cargando...", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        Text(text = chapterTitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver")
-                    }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver") }
                 },
                 actions = {
-                    IconButton(onClick = { showToc = true }) {
-                        Icon(Icons.AutoMirrored.Filled.FormatListBulleted, contentDescription = "Índice")
+                    if (!viewModel.isPdf) {
+                        IconButton(onClick = { showToc = true }) { Icon(Icons.AutoMirrored.Filled.FormatListBulleted, contentDescription = "Índice") }
                     }
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Ajustes")
-                    }
+                    IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f))
             )
         }
 
-        // 4. Barra Inferior
         AnimatedVisibility(
             visible = showControls,
             enter = slideInVertically(initialOffsetY = { it }),
@@ -245,45 +272,30 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
+                        Text(text = "Página ${viewModel.chapterCurrentPage + 1} de ${viewModel.chapterTotalPages}", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            text = "Página ${viewModel.chapterCurrentPage + 1} de ${viewModel.chapterTotalPages}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "Sección ${viewModel.currentChapterIndex + 1} de $totalChapters",
+                            text = if (viewModel.isPdf) "Documento PDF" else "Sección ${viewModel.currentChapterIndex + 1} de $totalChapters",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-
                     val percent = ((viewModel.globalCurrentPage.toFloat() / totalGlobal) * 100).toInt().coerceIn(0, 100)
-                    Text(
-                        text = "$percent%",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Text(text = "$percent%", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
 
-        // 5. Modal de Índice
-        if (showToc) {
+        if (showToc && !viewModel.isPdf) {
             AlertDialog(
                 onDismissRequest = { showToc = false },
                 title = { Text("Índice del Libro") },
                 text = {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp)
-                    ) {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
                         val chapters = viewModel.book?.chapters ?: emptyList()
                         itemsIndexed(chapters) { index, ch ->
                             ListItem(
@@ -294,23 +306,17 @@ fun ReaderScreen(
                                     showToc = false
                                 },
                                 colors = ListItemDefaults.colors(
-                                    containerColor = if (index == viewModel.currentChapterIndex)
-                                        MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                                    containerColor = if (index == viewModel.currentChapterIndex) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
                                 )
                             )
                             HorizontalDivider()
                         }
                     }
                 },
-                confirmButton = {
-                    TextButton(onClick = { showToc = false }) {
-                        Text("Cerrar")
-                    }
-                }
+                confirmButton = { TextButton(onClick = { showToc = false }) { Text("Cerrar") } }
             )
         }
 
-        // 6. Modal de Ajustes
         if (showSettings) {
             ReaderSettingsDialog(
                 currentSettings = viewModel.settings,
@@ -343,29 +349,15 @@ fun ReaderSettingsDialog(
                 Text("Tema", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     ReaderTheme.entries.forEach { t ->
-                        FilterChip(
-                            selected = theme == t,
-                            onClick = { theme = t },
-                            label = { Text(t.name) }
-                        )
+                        FilterChip(selected = theme == t, onClick = { theme = t }, label = { Text(t.name) })
                     }
                 }
-
                 Text("Tamaño de Letra: ${fontSize}px", style = MaterialTheme.typography.titleSmall)
-                Slider(
-                    value = fontSize.toFloat(),
-                    onValueChange = { fontSize = it.toInt() },
-                    valueRange = 14f..32f
-                )
-
+                Slider(value = fontSize.toFloat(), onValueChange = { fontSize = it.toInt() }, valueRange = 14f..32f)
                 Text("Tipografía", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                     ReaderFont.entries.forEach { f ->
-                        FilterChip(
-                            selected = font == f,
-                            onClick = { font = f },
-                            label = { Text(f.name) }
-                        )
+                        FilterChip(selected = font == f, onClick = { font = f }, label = { Text(f.name) })
                     }
                 }
             }
@@ -378,7 +370,7 @@ fun ReaderSettingsDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = { onDismiss() }) {
                 Text("Cancelar")
             }
         }
