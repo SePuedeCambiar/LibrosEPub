@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"reader-backend/internal/models"
 	"reader-backend/internal/providers"
 	"reader-backend/internal/storage"
@@ -12,7 +14,6 @@ import (
 )
 
 // BookHandler maneja las peticiones HTTP relacionadas con libros.
-// Cumple con DIP: depende de abstracciones inyectadas en su constructor.
 type BookHandler struct {
 	providerManager *providers.Manager
 	storageService  storage.StorageService
@@ -42,7 +43,7 @@ func (h *BookHandler) Search(w http.ResponseWriter, r *http.Request) {
 	author := strings.TrimSpace(r.URL.Query().Get("author"))
 	lang := strings.TrimSpace(r.URL.Query().Get("lang"))
 	if lang == "" {
-		lang = "es" // Español por defecto
+		lang = "es"
 	}
 
 	limit := 10
@@ -60,7 +61,6 @@ func (h *BookHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	startTime := time.Now()
-	// Busca concurrentemente en todos los proveedores registrados
 	books, err := h.providerManager.SearchAll(r.Context(), filter)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "error consultando fuentes de libros: "+err.Error())
@@ -91,7 +91,6 @@ func (h *BookHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validaciones básicas
 	req.DownloadURL = strings.TrimSpace(req.DownloadURL)
 	req.Title = strings.TrimSpace(req.Title)
 
@@ -104,7 +103,52 @@ func (h *BookHandler) Download(w http.ResponseWriter, r *http.Request) {
 		req.Extension = "epub"
 	}
 
-	// Descarga en streaming hacia la carpeta sincronizada con Syncthing
+	// ========================================================================
+	// LÓGICA DE RUTEO DE DESCARGA (BYPASS & SCRAPING)
+	// ========================================================================
+
+	// CASO 1: Es un enlace de Google Drive (Requiere Bypass de Cookies/Tokens)
+	if strings.Contains(req.DownloadURL, "drive.google.com") {
+		bypasser := providers.NewDriveBypasser()
+		realURL, err := bypasser.GetDirectDownloadLink(r.Context(), req.DownloadURL)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "Error saltando protección de Google Drive: "+err.Error())
+			return
+		}
+		// Actualizamos la URL por la URL directa de descarga
+		req.DownloadURL = realURL
+	}
+
+	// CASO 2: Es una Novela Ligera (Requiere Scraping + Compilación de EPUB)
+	// Identificamos si es una novela por la URL o el proveedor
+	if strings.Contains(req.DownloadURL, "novela") || strings.Contains(req.DownloadURL, "manga") {
+		lnProvider, err := h.providerManager.Get("ln_spanish")
+		if err == nil {
+			if scraper, ok := lnProvider.(*providers.LightNovelProvider); ok {
+				// Sanitizamos el nombre para el archivo final
+				fileName := fmt.Sprintf("%s.%s", strings.ReplaceAll(strings.ToLower(req.Title), " ", "_"), req.Extension)
+				targetPath := filepath.Join(h.storageService.GetBasePath(), fileName)
+
+				// El scraper descarga capítulos y compila el EPUB directamente al disco
+				err := scraper.ScrapeAndBuildEpub(r.Context(), req.DownloadURL, targetPath, 100) // Max 100 caps
+				if err != nil {
+					h.writeError(w, http.StatusInternalServerError, "Error compilando novela ligera: "+err.Error())
+					return
+				}
+
+				h.writeJSON(w, http.StatusCreated, models.DownloadResponse{
+					Success:      true,
+					FileName:     fileName,
+					FilePath:     targetPath,
+					DownloadedAt: time.Now(),
+				})
+				return
+			}
+		}
+	}
+
+	// CASO 3: Descarga Estándar (Streaming directo a disco)
+	// Este camino se toma si es un link directo, un link de Gutenberg, o un link de Drive ya procesado
 	result, err := h.storageService.SaveFromURL(r.Context(), req.DownloadURL, req.Title, req.Extension)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "error al guardar el archivo: "+err.Error())

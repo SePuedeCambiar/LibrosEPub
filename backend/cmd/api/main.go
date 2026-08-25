@@ -37,13 +37,19 @@ func main() {
 		log.Fatalf("❌ Error crítico inicializando almacenamiento: %v", err)
 	}
 
-	// 4. Inicialización y registro de proveedores de libros (Open/Closed Principle)
+        // 4. Inicialización y registro de proveedores de libros (Open/Closed Principle)
 	providerManager := providers.NewManager()
+	
+	// Proveedor de Project Gutenberg
 	gutenberg := providers.NewGutenbergProvider(httpClient)
 	providerManager.Register(gutenberg)
 
-	// (Aquí se registrarán futuros proveedores, ej: Scraper de novelas ligeras)
-	log.Printf("🔌 Proveedores registrados: [%s]", gutenberg.Name())
+	// Proveedor de Novelas Ligeras (AÑADE ESTO)
+	lnScraper := providers.NewLightNovelProvider(httpClient)
+	providerManager.Register(lnScraper)
+
+	log.Printf("🔌 Proveedores registrados: [%s, %s]", gutenberg.Name(), lnScraper.Name())
+
 
 	// 5. Inyección de dependencias en los handlers y configuración de rutas
 	bookHandler := handlers.NewBookHandler(providerManager, fileStorage)
